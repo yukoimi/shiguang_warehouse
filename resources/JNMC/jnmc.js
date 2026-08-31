@@ -5,26 +5,26 @@
 //   GET  /xsgrkbcx!xsAllKbList.action?xnxqdm=XX  整学期课表（HTML 内嵌 var kbxx=[...] 课程 JSON）
 //   POST /default!getCalendar.action             桌面日历事件（每节课带精确起止时间，用于补齐作息）
 
-// 预置作息表（节 1~14 连续，App 要求时间槽从 1 开始且连续）
-// 节 1~4、6~9：由学生课表 64 个日历事件实测验证（45 分钟/节，块间 20 分钟）
-// 节 5：学生课表无此节课程，按午后首节推断（13:30-14:15，休 15 分钟后接 14:30 的第 6 节）
-// 节 10~14：按晚间 18:00 起、45 分钟/节 + 10 分钟课间推断（第 14 节止于 22:25，与桌面日历 maxTime 22:30 吻合）
-// 若实际课表含节 5/10~14 的课，getCalendar 的单节事件会精确覆盖对应预置值
+// 预置作息表（节 1~12 连续，App 要求时间槽从 1 开始且连续；学校作息共 12 节，网格 14 行是模板冗余）
+// 依据：《济宁医学院节次表》（2019 官方文档，40 分钟/节 + 10 分钟课间，分冬季/夏季两套）
+// 节 1~4、6~9：官方表与 2026 年学生课表 64 个日历事件实测互相印证（节 8/9 实测比官方夏季表后移 10 分钟，以实测为准）
+// 节 5：官方表 11:30-12:10（午前第五节）
+// 节 10~12：官方夏季表晚间段（系统事件按统一时间生成，不随冬季作息切换）
+// 备注：冬季作息下午 14:00 起、晚间 19:00 起，与系统排课时间不同，以系统实测时间为准
+// 若实际课表含节 10~12 的课，getCalendar 的单节事件会精确覆盖对应预置值
 const PRESET_TIME_SLOTS = [
-    { number: 1, startTime: "08:00", endTime: "08:45" },
-    { number: 2, startTime: "08:45", endTime: "09:30" },
-    { number: 3, startTime: "09:50", endTime: "10:35" },
-    { number: 4, startTime: "10:35", endTime: "11:20" },
-    { number: 5, startTime: "13:30", endTime: "14:15" },
-    { number: 6, startTime: "14:30", endTime: "15:15" },
-    { number: 7, startTime: "15:15", endTime: "16:00" },
-    { number: 8, startTime: "16:20", endTime: "17:05" },
-    { number: 9, startTime: "17:05", endTime: "17:50" },
-    { number: 10, startTime: "18:00", endTime: "18:45" },
-    { number: 11, startTime: "18:55", endTime: "19:40" },
-    { number: 12, startTime: "19:50", endTime: "20:35" },
-    { number: 13, startTime: "20:45", endTime: "21:30" },
-    { number: 14, startTime: "21:40", endTime: "22:25" }
+    { number: 1, startTime: "08:00", endTime: "08:40" },
+    { number: 2, startTime: "08:50", endTime: "09:30" },
+    { number: 3, startTime: "09:50", endTime: "10:30" },
+    { number: 4, startTime: "10:40", endTime: "11:20" },
+    { number: 5, startTime: "11:30", endTime: "12:10" },
+    { number: 6, startTime: "14:30", endTime: "15:10" },
+    { number: 7, startTime: "15:20", endTime: "16:00" },
+    { number: 8, startTime: "16:20", endTime: "17:00" },
+    { number: 9, startTime: "17:10", endTime: "17:50" },
+    { number: 10, startTime: "18:00", endTime: "18:40" },
+    { number: 11, startTime: "19:30", endTime: "20:10" },
+    { number: 12, startTime: "20:20", endTime: "21:00" }
 ];
 
 // 周次字符串（"10,7,8,9"）→ 去重排序的周数组
