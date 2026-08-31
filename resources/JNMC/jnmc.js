@@ -190,7 +190,7 @@ async function runImportFlow() {
             window.shiguangBridge.showToast(`课程已导入，作息时间导入失败：${error.message}`);
         }
 
-        window.shiguangBridge.showToast("导入完成");
+        window.shiguangBridge.showToast(`成功导入 ${courses.length} 门课程！`);
         window.shiguangBridge.notifyTaskCompletion();
     } catch (error) {
         await window.shiguangBridgePromise.showAlert(
