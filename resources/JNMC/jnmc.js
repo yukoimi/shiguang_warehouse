@@ -1,17 +1,15 @@
 // 济宁医学院教务（乘方教务 · 旧版 .action 接口）适配器
-// 流程：提示已登录 → 选择学期 → 拉取整学期课表 → 按需用日历接口补齐作息时间 → 保存课程与作息
+// 流程：提示已登录 → 选择学期 → 拉取整学期课表 → 保存课程与作息
 // 接口：
 //   GET  /xsgrkbcx!getXsgrbkList.action          课表主页（内含学期下拉 xnxqdm）
 //   GET  /xsgrkbcx!xsAllKbList.action?xnxqdm=XX  整学期课表（HTML 内嵌 var kbxx=[...] 课程 JSON）
-//   POST /default!getCalendar.action             桌面日历事件（每节课带精确起止时间，用于补齐作息）
 
 // 预置作息表（节 1~12 连续，App 要求时间槽从 1 开始且连续；学校作息共 12 节，网格 14 行是模板冗余）
 // 依据：《济宁医学院节次表》（2019 官方文档，40 分钟/节 + 10 分钟课间，分冬季/夏季两套）
-// 节 1~4、6~9：官方表与 2026 年学生课表 64 个日历事件实测互相印证（节 8/9 实测比官方夏季表后移 10 分钟，以实测为准）
+// 与 2026 学年学生课表 64 个日历事件实测互相印证（节 8/9 实测比官方夏季表后移 10 分钟，以实测为准）
+// 实测冬季时段（10、11 月）课程与夏季时段（9 月）起止时间完全一致：系统排课全年统一一套时间，不随官方冬夏作息切换
 // 节 5：官方表 11:30-12:10（午前第五节）
-// 节 10~12：官方夏季表晚间段（系统事件按统一时间生成，不随冬季作息切换）
-// 备注：冬季作息下午 14:00 起、晚间 19:00 起，与系统排课时间不同，以系统实测时间为准
-// 若实际课表含节 10~12 的课，getCalendar 的单节事件会精确覆盖对应预置值
+// 节 10~12：官方夏季表晚间段（系统排课与冬季作息无关，晚间课按统一时间生成）
 const PRESET_TIME_SLOTS = [
     { number: 1, startTime: "08:00", endTime: "08:40" },
     { number: 2, startTime: "08:50", endTime: "09:30" },
@@ -44,12 +42,6 @@ function resolvePosition(raw) {
     return position || "待定";
 }
 
-function minutesToHHMM(totalMin) {
-    const h = Math.floor(totalMin / 60);
-    const m = Math.round(totalMin % 60);
-    return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
-}
-
 // 课表 JSON 解析：kbxx 字段 → 拾光课程格式
 function parseCourseList(kbxx) {
     if (!Array.isArray(kbxx)) throw new Error("课表接口返回格式不正确");
@@ -80,43 +72,6 @@ function parseCourseList(kbxx) {
     return Array.from(courseMap.values()).sort((a, b) =>
         a.day - b.day || a.startSection - b.startSection || a.endSection - b.endSection || a.name.localeCompare(b.name)
     );
-}
-
-// 把日历事件（lx=kb，带 qssj/jssj/ps/pe）合并进作息表：
-// 单节事件（ps==pe）的起止时间即该节精确作息，直接覆盖预置值；
-// 多节事件只填充预置中缺失的节次（多节段按等时长切分）
-function mergeTimeSlots(events) {
-    const slots = new Map(PRESET_TIME_SLOTS.map(s => [s.number, { ...s }]));
-    (Array.isArray(events) ? events : []).forEach(event => {
-        if (String(event.lx || "").trim() !== "kb") return;
-        const ps = parseInt(event.ps, 10);
-        const pe = parseInt(event.pe, 10);
-        const start = String(event.qssj || "").slice(0, 5);
-        const end = String(event.jssj || "").slice(0, 5);
-        if (isNaN(ps) || isNaN(pe) || ps < 1 || pe < ps) return;
-        if (!/^\d{2}:\d{2}$/.test(start) || !/^\d{2}:\d{2}$/.test(end)) return;
-
-        if (ps === pe) {
-            slots.set(ps, { number: ps, startTime: start, endTime: end });
-            return;
-        }
-        const [sh, sm] = start.split(":").map(Number);
-        const [eh, em] = end.split(":").map(Number);
-        const totalMin = (eh * 60 + em) - (sh * 60 + sm);
-        const count = pe - ps + 1;
-        if (totalMin <= 0 || count < 2) return;
-        const segment = totalMin / count;
-        for (let s = ps; s <= pe; s++) {
-            if (slots.has(s)) continue;
-            const offset = (s - ps) * segment;
-            slots.set(s, {
-                number: s,
-                startTime: minutesToHHMM(sh * 60 + sm + offset),
-                endTime: minutesToHHMM(sh * 60 + sm + offset + segment)
-            });
-        }
-    });
-    return Array.from(slots.values()).sort((a, b) => a.number - b.number);
 }
 
 // 读取页面中的学期下拉框
@@ -192,29 +147,6 @@ async function fetchCourseData(xnxqdm) {
     return kbxx;
 }
 
-// 拉取日历事件（含每节课的精确起止时间），用于补齐作息表中缺失的节次
-async function fetchCalendarEvents(xnxqdm) {
-    const year = parseInt(String(xnxqdm).slice(0, 4), 10);
-    const term = String(xnxqdm).slice(4, 6);
-    const [d1, d2] = term === "02"
-        ? [`${year}-01-01 00:00:00`, `${year}-08-31 23:59:59`]
-        : [`${year}-08-01 00:00:00`, `${year + 1}-08-31 23:59:59`];
-    const formData = new URLSearchParams();
-    formData.append("d1", d1);
-    formData.append("d2", d2);
-    const response = await fetch("/default!getCalendar.action", {
-        method: "POST",
-        headers: {
-            "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-            "X-Requested-With": "XMLHttpRequest"
-        },
-        credentials: "include",
-        body: formData.toString()
-    });
-    if (!response.ok) throw new Error(`日历请求失败（HTTP ${response.status}）`);
-    return response.json();
-}
-
 async function saveCourses(courses) {
     await window.shiguangBridgePromise.saveImportedCourses(JSON.stringify(courses));
 }
@@ -249,13 +181,7 @@ async function runImportFlow() {
             return;
         }
 
-        let timeSlots = PRESET_TIME_SLOTS.map(s => ({ ...s }));
-        try {
-            timeSlots = mergeTimeSlots(await fetchCalendarEvents(semester.value));
-        } catch (error) {
-            // 日历接口失败不影响主流程，仅使用预置作息表
-            window.shiguangBridge.showToast("作息时间使用预置数据（日历接口不可用）");
-        }
+        const timeSlots = PRESET_TIME_SLOTS.map(s => ({ ...s }));
 
         await saveCourses(courses);
         try {
