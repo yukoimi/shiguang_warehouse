@@ -812,4 +812,9 @@ schools:
     name: "西南大学"
     initial: "X"
     resource_folder: "SWU"
+
+  - id: "JNMC"
+    name: "济宁医学院"
+    initial: "J"
+    resource_folder: "JNMC"
     
