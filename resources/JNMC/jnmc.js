@@ -1,15 +1,5 @@
 // 济宁医学院教务（乘方教务 · 旧版 .action 接口）适配器
-// 流程：提示已登录 → 选择学期 → 拉取整学期课表 → 保存课程与作息
-// 接口：
-//   GET  /xsgrkbcx!getXsgrbkList.action          课表主页（内含学期下拉 xnxqdm）
-//   GET  /xsgrkbcx!xsAllKbList.action?xnxqdm=XX  整学期课表（HTML 内嵌 var kbxx=[...] 课程 JSON）
 
-// 预置作息表（节 1~12 连续，App 要求时间槽从 1 开始且连续；学校作息共 12 节，网格 14 行是模板冗余）
-// 依据：《济宁医学院节次表》（2019 官方文档，40 分钟/节 + 10 分钟课间，分冬季/夏季两套）
-// 与 2026 学年学生课表 64 个日历事件实测互相印证（节 8/9 实测比官方夏季表后移 10 分钟，以实测为准）
-// 实测冬季时段（10、11 月）课程与夏季时段（9 月）起止时间完全一致：系统排课全年统一一套时间，不随官方冬夏作息切换
-// 节 5：官方表 11:30-12:10（午前第五节）
-// 节 10~12：官方夏季表晚间段（系统排课与冬季作息无关，晚间课按统一时间生成）
 const PRESET_TIME_SLOTS = [
     { number: 1, startTime: "08:00", endTime: "08:40" },
     { number: 2, startTime: "08:50", endTime: "09:30" },
@@ -25,24 +15,20 @@ const PRESET_TIME_SLOTS = [
     { number: 12, startTime: "20:20", endTime: "21:00" }
 ];
 
-// 周次字符串（"10,7,8,9"）→ 去重排序的周数组
+// 周次字符串 "10,7,8,9" → 去重排序的周数组
 function parseWeeks(weekStr) {
     if (!weekStr) return [];
     const weeks = weekStr.split(",").map(w => parseInt(w.trim(), 10)).filter(w => !isNaN(w) && w > 0);
     return [...new Set(weeks)].sort((a, b) => a - b);
 }
 
-function cleanTeacherName(raw) {
-    return String(raw || "").replace(/\[[^\]]*\]/g, "").trim();
-}
-
-// 教室可能为空、含 "\\" 分隔的多个教室（如 "B205\206教室"）或以 "," 分隔的多场地
+// 教室可能为空、含 "\\" 分隔的多教室（如 "B205\206教室"）或以 "," 分隔的多场地
 function resolvePosition(raw) {
     const position = String(raw || "").replace(/\\/g, "/").trim();
     return position || "待定";
 }
 
-// 课表 JSON 解析：kbxx 字段 → 拾光课程格式
+// kbxx 课程 JSON → 拾光课程格式（合并同 key 课程的周次）
 function parseCourseList(kbxx) {
     if (!Array.isArray(kbxx)) throw new Error("课表接口返回格式不正确");
     const courseMap = new Map();
@@ -55,7 +41,7 @@ function parseCourseList(kbxx) {
 
         const course = {
             name: item.kcmc.trim(),
-            teacher: cleanTeacherName(item.teaxms) || "未知",
+            teacher: String(item.teaxms || "").trim() || "未知",
             position: resolvePosition(item.jxcdmcs),
             day,
             startSection: Math.min(...sections),
@@ -74,7 +60,7 @@ function parseCourseList(kbxx) {
     );
 }
 
-// 读取页面中的学期下拉框
+// 读取课表页中的学期下拉框
 function extractSemesterOptions(doc) {
     const selectElem = doc.getElementById("xnxqdm");
     if (!selectElem) return null;
@@ -98,7 +84,7 @@ function extractSemesterOptions(doc) {
     };
 }
 
-// 导入前提示用户先登录教务系统
+// 导入前提示先登录教务系统
 async function promptUserToStart() {
     return await window.shiguangBridgePromise.showAlert(
         "济宁医学院教务导入",
@@ -107,7 +93,7 @@ async function promptUserToStart() {
     );
 }
 
-// 从页面已有学期中选择目标学期
+// 选择学期
 async function selectSemester(semesterOptions) {
     const selectedIndex = await window.shiguangBridgePromise.showSingleSelection(
         "选择学期",
@@ -121,14 +107,14 @@ async function selectSemester(semesterOptions) {
     };
 }
 
-// 获取课表页 HTML（含学期列表）
+// 拉取课表页 HTML（含学期列表）
 async function fetchSchedulePage() {
     const response = await fetch("/xsgrkbcx!getXsgrbkList.action", { method: "GET", credentials: "include" });
     if (!response.ok) throw new Error(`无法打开课表页面（HTTP ${response.status}）`);
     return response.text();
 }
 
-// 获取指定学期的整学期课表 HTML（内嵌 var kbxx=[...]）
+// 拉取指定学期课表（HTML 内嵌 var kbxx=[...]）
 async function fetchCourseData(xnxqdm) {
     const response = await fetch(
         `/xsgrkbcx!xsAllKbList.action?xnxqdm=${encodeURIComponent(xnxqdm)}`,
@@ -147,16 +133,7 @@ async function fetchCourseData(xnxqdm) {
     return kbxx;
 }
 
-async function saveCourses(courses) {
-    await window.shiguangBridgePromise.saveImportedCourses(JSON.stringify(courses));
-}
-
-async function saveTimeSlots(timeSlots) {
-    if (timeSlots.length === 0) return;
-    await window.shiguangBridgePromise.savePresetTimeSlots(JSON.stringify(timeSlots));
-}
-
-// 编排导入流程：提示 → 选学期 → 请求课表 → 补齐作息 → 保存
+// 主流程：提示 → 选学期 → 拉课表 → 保存课程与作息
 async function runImportFlow() {
     try {
         const confirmed = await promptUserToStart();
@@ -181,11 +158,9 @@ async function runImportFlow() {
             return;
         }
 
-        const timeSlots = PRESET_TIME_SLOTS.map(s => ({ ...s }));
-
-        await saveCourses(courses);
+        await window.shiguangBridgePromise.saveImportedCourses(JSON.stringify(courses));
         try {
-            await saveTimeSlots(timeSlots);
+            await window.shiguangBridgePromise.savePresetTimeSlots(JSON.stringify(PRESET_TIME_SLOTS));
         } catch (error) {
             window.shiguangBridge.showToast(`课程已导入，作息时间导入失败：${error.message}`);
         }
